@@ -1,6 +1,7 @@
 import os
 import re
 import tempfile
+import requests
 import urllib.request
 import docx
 from docx import Document
