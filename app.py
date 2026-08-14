@@ -31,39 +31,41 @@ for batch_num, floors in enumerate(BATCH_SPECS, start=1):
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def load_ocr_reader():
-    model_dir = "./models"
-    os.makedirs(model_dir, exist_ok=True)
-    
-    # Direct URLs to EasyOCR model weights
-    craft_url = "https://github.com/JaidedAI/EasyOCR/releases/download/pre-v1.1.6/craft_mlt_25k.pth"
-    english_url = "https://github.com/JaidedAI/EasyOCR/releases/download/v1.3/english_g2.pth"
-    
-    craft_path = os.path.join(model_dir, "craft_mlt_25k.pth")
-    english_path = os.path.join(model_dir, "english_g2.pth")
-    
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+  model_dir = './models'
+  os.makedirs(model_dir, exist_ok=True)
 
-    # Download CRAFT model if missing
-    if not os.path.exists(craft_path):
-        with st.spinner("Downloading OCR detection model (~70MB)... Please wait."):
-            response = requests.get(craft_url, headers=headers, stream=True)
-            response.raise_for_status()
-            with open(craft_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            
-    # Download English model if missing
-    if not os.path.exists(english_path):
-        with st.spinner("Downloading OCR language model (~15MB)... Please wait."):
-            response = requests.get(english_url, headers=headers, stream=True)
-            response.raise_for_status()
-            with open(english_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            
-    # Load EasyOCR from local cached directory
-    return easyocr.Reader(['en'], gpu=False, model_storage_directory=model_dir, download_enabled=False, verbose=False)
+  # Direct download links from your GitHub release
+  craft_url = 'https://github.com/kijoe20/daily-site-inspector-91/releases/download/v1.0.0/craft_mlt_25k.pth'
+  english_url = 'https://github.com/kijoe20/daily-site-inspector-91/releases/download/v1.0.0/english_g2.pth'
 
+  craft_path = os.path.join(model_dir, 'craft_mlt_25k.pth')
+  english_path = os.path.join(model_dir, 'english_g2.pth')
+
+  headers = {'User-Agent': 'Mozilla/5.0'}
+
+  if not os.path.exists(craft_path):
+    with st.spinner(
+        'Downloading OCR detection model (~70MB)... Please wait.'
+    ):
+      r = requests.get(craft_url, headers=headers, allow_redirects=True)
+      r.raise_for_status()
+      with open(craft_path, 'wb') as f:
+        f.write(r.content)
+
+  if not os.path.exists(english_path):
+    with st.spinner('Downloading OCR language model (~15MB)... Please wait.'):
+      r = requests.get(english_url, headers=headers, allow_redirects=True)
+      r.raise_for_status()
+      with open(english_path, 'wb') as f:
+        f.write(r.content)
+
+  return easyocr.Reader(
+      ['en'],
+      gpu=False,
+      model_storage_directory=model_dir,
+      download_enabled=False,
+      verbose=False,
+  )
 # -----------------------------------------------------------------------------
 # 3. HELPER FUNCTIONS
 # -----------------------------------------------------------------------------
