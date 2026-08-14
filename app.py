@@ -35,7 +35,6 @@ def load_ocr_reader():
     model_dir = "./models"
     os.makedirs(model_dir, exist_ok=True)
     
-    # Direct download links from your GitHub release
     craft_url = "https://github.com/kijoe20/daily-site-inspector-91/releases/download/v1.0.0/craft_mlt_25k.pth"
     english_url = "https://github.com/kijoe20/daily-site-inspector-91/releases/download/v1.0.0/english_g2.pth"
     
@@ -65,7 +64,6 @@ def load_ocr_reader():
 # -----------------------------------------------------------------------------
 def extract_location_text(image_path, reader):
     try:
-        # Restrict characters to speed up EasyOCR and improve accuracy
         results = reader.readtext(image_path, detail=0, allowlist='0123456789/F ABCD')
         combined_text = " ".join(results).upper()
         
@@ -146,23 +144,30 @@ st.set_page_config(page_title="Daily OCR Reporter", layout="wide")
 st.title("📋 Daily OCR Reporter")
 st.markdown("Upload your inspection photos and template to compile a formatted Word report.")
 
-reader = load_ocr_reader()
-
 col1, col2 = st.columns([1, 1])
 
 with col1:
     st.subheader("1. Upload Files")
     uploaded_template = st.file_uploader("Word Template (.docx)", type=['docx'])
     uploaded_images = st.file_uploader("Upload Photos", type=['jpg', 'jpeg', 'png', 'bmp'], accept_multiple_files=True)
+    
+    skip_ocr = st.checkbox(
+        "⚡ Skip OCR (Photos are already named correctly)", 
+        value=False,
+        help="Check this box if your photos are already renamed (e.g., '18F A2.jpg'). The report will build instantly without scanning text."
+    )
 
 with col2:
     st.subheader("2. Generate Report")
     
     if uploaded_images:
-        if st.button("🚀 Process Photos & Build Report", type="primary"):
-            
+        btn_label = "🚀 Build Report (No OCR)" if skip_ocr else "🚀 Process Photos & Build Report"
+        
+        if st.button(btn_label, type="primary"):
             progress_bar = st.progress(0)
             status_text = st.empty()
+            
+            reader = None if skip_ocr else load_ocr_reader()
             
             with tempfile.TemporaryDirectory() as temp_dir:
                 template_path = None
@@ -181,24 +186,24 @@ with col2:
                     
                     temp_img_path = os.path.join(temp_dir, img_file.name)
                     
-                    # --- RAM OPTIMIZATION: Resize image to max 1200px before saving ---
                     with Image.open(img_file) as img:
                         img.thumbnail((1200, 1200))
                         img.save(temp_img_path, quality=85)
                     
-                    detected_loc = extract_location_text(temp_img_path, reader)
-                    ext = os.path.splitext(img_file.name)[1]
-                    
-                    if detected_loc:
-                        safe_loc = detected_loc.replace('/', '').strip()
-                        name_counter[safe_loc] = name_counter.get(safe_loc, 0) + 1
-                        new_name = f"{safe_loc} ({name_counter[safe_loc]}){ext}"
-                    else:
+                    if skip_ocr:
                         new_name = img_file.name
+                    else:
+                        detected_loc = extract_location_text(temp_img_path, reader)
+                        ext = os.path.splitext(img_file.name)[1]
+                        
+                        if detected_loc:
+                            safe_loc = detected_loc.replace('/', '').strip()
+                            name_counter[safe_loc] = name_counter.get(safe_loc, 0) + 1
+                            new_name = f"{safe_loc} ({name_counter[safe_loc]}){ext}"
+                        else:
+                            new_name = img_file.name
                     
                     processed_images.append({'path': temp_img_path, 'new_name': new_name})
-                    
-                    # Explicitly release memory after each photo
                     gc.collect()
                 
                 status_text.text("Building Word document...")
@@ -207,12 +212,19 @@ with col2:
                 
                 progress_bar.progress(1.0)
                 status_text.empty()
-                st.success(f"Successfully processed {total_imgs} photos!")
                 
+                # --- STORE GENERATED REPORT IN SESSION STATE ---
                 with open(output_docx_path, "rb") as f:
-                    st.download_button(
-                        label="📥 Download Word Report",
-                        data=f.read(),
-                        file_name="Photo_Location_Table_Output.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
+                    st.session_state['report_bytes'] = f.read()
+                st.session_state['report_total_imgs'] = total_imgs
+
+    # --- PERSISTENT DOWNLOAD BUTTON ---
+    if 'report_bytes' in st.session_state:
+        st.success(f"Successfully compiled report with {st.session_state['report_total_imgs']} photos!")
+        st.download_button(
+            label="📥 Download Word Report (.docx)",
+            data=st.session_state['report_bytes'],
+            file_name="Photo_Location_Table_Output.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            key="download_report_btn"
+        )
