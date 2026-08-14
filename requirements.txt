@@ -3,3 +3,4 @@ easyocr
 python-docx
 torch
 torchvision
+requests
