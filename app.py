@@ -70,22 +70,26 @@ def load_ocr_reader():
 # 3. HELPER FUNCTIONS
 # -----------------------------------------------------------------------------
 def extract_location_text(image_path, reader):
-    try:
-        results = reader.readtext(image_path, detail=0)
-        combined_text = " ".join(results).upper()
-        
-        pattern = r'(\d+(?:/F)?\s*[A-D]\d*)'
-        match = re.search(pattern, combined_text)
-        
-        if match:
-            raw_match = match.group(1).replace(" ", "")
-            if 'F' in raw_match and '/' not in raw_match:
-                raw_match = raw_match.replace('F', '/F')
-            final_name = raw_match.replace('/F', '/F ')
-            return final_name
-    except Exception as e:
-        st.error(f"Error reading {os.path.basename(image_path)}: {e}")
-    return None
+  try:
+    # Added allowlist parameter here to restrict OCR to relevant characters:
+    # Digits (0-9), Slashing/F for Floor (/F), and Unit Letters (A, B, C, D)
+    results = reader.readtext(
+        image_path, detail=0, allowlist='0123456789/F ABCD'
+    )
+    combined_text = ' '.join(results).upper()
+
+    pattern = r'(\d+(?:/F)?\s*[A-D]\d*)'
+    match = re.search(pattern, combined_text)
+
+    if match:
+      raw_match = match.group(1).replace(' ', '')
+      if 'F' in raw_match and '/' not in raw_match:
+        raw_match = raw_match.replace('F', '/F')
+      final_name = raw_match.replace('/F', '/F ')
+      return final_name
+  except Exception as e:
+    st.error(f'Error reading {os.path.basename(image_path)}: {e}')
+  return None
 
 def extract_floor(filename):
     match = re.search(r'(\d+)\s*/?\s*F', filename, re.IGNORECASE)
