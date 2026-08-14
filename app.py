@@ -1,12 +1,13 @@
+import gc
 import os
 import re
 import tempfile
-import requests
-import urllib.request
 import docx
 from docx import Document
 from docx.shared import Inches, Pt
 import easyocr
+from PIL import Image
+import requests
 import streamlit as st
 
 # -----------------------------------------------------------------------------
@@ -31,65 +32,55 @@ for batch_num, floors in enumerate(BATCH_SPECS, start=1):
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def load_ocr_reader():
-  model_dir = './models'
-  os.makedirs(model_dir, exist_ok=True)
+    model_dir = "./models"
+    os.makedirs(model_dir, exist_ok=True)
+    
+    # Direct download links from your GitHub release
+    craft_url = "https://github.com/kijoe20/daily-site-inspector-91/releases/download/v1.0.0/craft_mlt_25k.pth"
+    english_url = "https://github.com/kijoe20/daily-site-inspector-91/releases/download/v1.0.0/english_g2.pth"
+    
+    craft_path = os.path.join(model_dir, "craft_mlt_25k.pth")
+    english_path = os.path.join(model_dir, "english_g2.pth")
+    
+    headers = {'User-Agent': 'Mozilla/5.0'}
 
-  # Direct download links from your GitHub release
-  craft_url = 'https://github.com/kijoe20/daily-site-inspector-91/releases/download/v1.0.0/craft_mlt_25k.pth'
-  english_url = 'https://github.com/kijoe20/daily-site-inspector-91/releases/download/v1.0.0/english_g2.pth'
+    if not os.path.exists(craft_path):
+        with st.spinner("Downloading OCR detection model (~70MB)... Please wait."):
+            r = requests.get(craft_url, headers=headers, allow_redirects=True)
+            r.raise_for_status()
+            with open(craft_path, 'wb') as f:
+                f.write(r.content)
+            
+    if not os.path.exists(english_path):
+        with st.spinner("Downloading OCR language model (~15MB)... Please wait."):
+            r = requests.get(english_url, headers=headers, allow_redirects=True)
+            r.raise_for_status()
+            with open(english_path, 'wb') as f:
+                f.write(r.content)
+            
+    return easyocr.Reader(['en'], gpu=False, model_storage_directory=model_dir, download_enabled=False, verbose=False)
 
-  craft_path = os.path.join(model_dir, 'craft_mlt_25k.pth')
-  english_path = os.path.join(model_dir, 'english_g2.pth')
-
-  headers = {'User-Agent': 'Mozilla/5.0'}
-
-  if not os.path.exists(craft_path):
-    with st.spinner(
-        'Downloading OCR detection model (~70MB)... Please wait.'
-    ):
-      r = requests.get(craft_url, headers=headers, allow_redirects=True)
-      r.raise_for_status()
-      with open(craft_path, 'wb') as f:
-        f.write(r.content)
-
-  if not os.path.exists(english_path):
-    with st.spinner('Downloading OCR language model (~15MB)... Please wait.'):
-      r = requests.get(english_url, headers=headers, allow_redirects=True)
-      r.raise_for_status()
-      with open(english_path, 'wb') as f:
-        f.write(r.content)
-
-  return easyocr.Reader(
-      ['en'],
-      gpu=False,
-      model_storage_directory=model_dir,
-      download_enabled=False,
-      verbose=False,
-  )
 # -----------------------------------------------------------------------------
 # 3. HELPER FUNCTIONS
 # -----------------------------------------------------------------------------
 def extract_location_text(image_path, reader):
-  try:
-    # Added allowlist parameter here to restrict OCR to relevant characters:
-    # Digits (0-9), Slashing/F for Floor (/F), and Unit Letters (A, B, C, D)
-    results = reader.readtext(
-        image_path, detail=0, allowlist='0123456789/F ABCD'
-    )
-    combined_text = ' '.join(results).upper()
-
-    pattern = r'(\d+(?:/F)?\s*[A-D]\d*)'
-    match = re.search(pattern, combined_text)
-
-    if match:
-      raw_match = match.group(1).replace(' ', '')
-      if 'F' in raw_match and '/' not in raw_match:
-        raw_match = raw_match.replace('F', '/F')
-      final_name = raw_match.replace('/F', '/F ')
-      return final_name
-  except Exception as e:
-    st.error(f'Error reading {os.path.basename(image_path)}: {e}')
-  return None
+    try:
+        # Restrict characters to speed up EasyOCR and improve accuracy
+        results = reader.readtext(image_path, detail=0, allowlist='0123456789/F ABCD')
+        combined_text = " ".join(results).upper()
+        
+        pattern = r'(\d+(?:/F)?\s*[A-D]\d*)'
+        match = re.search(pattern, combined_text)
+        
+        if match:
+            raw_match = match.group(1).replace(" ", "")
+            if 'F' in raw_match and '/' not in raw_match:
+                raw_match = raw_match.replace('F', '/F')
+            final_name = raw_match.replace('/F', '/F ')
+            return final_name
+    except Exception as e:
+        st.error(f"Error reading {os.path.basename(image_path)}: {e}")
+    return None
 
 def extract_floor(filename):
     match = re.search(r'(\d+)\s*/?\s*F', filename, re.IGNORECASE)
@@ -155,7 +146,6 @@ st.set_page_config(page_title="Daily OCR Reporter", layout="wide")
 st.title("📋 Daily OCR Reporter")
 st.markdown("Upload your inspection photos and template to compile a formatted Word report.")
 
-# Initialize cached OCR Reader
 reader = load_ocr_reader()
 
 col1, col2 = st.columns([1, 1])
@@ -170,44 +160,59 @@ with col2:
     
     if uploaded_images:
         if st.button("🚀 Process Photos & Build Report", type="primary"):
-            with st.spinner("Processing OCR and generating Word document..."):
+            
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            with tempfile.TemporaryDirectory() as temp_dir:
+                template_path = None
+                if uploaded_template:
+                    template_path = os.path.join(temp_dir, "template.docx")
+                    with open(template_path, "wb") as f:
+                        f.write(uploaded_template.getbuffer())
                 
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    template_path = None
-                    if uploaded_template:
-                        template_path = os.path.join(temp_dir, "template.docx")
-                        with open(template_path, "wb") as f:
-                            f.write(uploaded_template.getbuffer())
+                name_counter = {}
+                processed_images = []
+                total_imgs = len(uploaded_images)
+                
+                for idx, img_file in enumerate(uploaded_images):
+                    status_text.text(f"Processing photo {idx + 1} of {total_imgs}...")
+                    progress_bar.progress((idx + 1) / total_imgs)
                     
-                    name_counter = {}
-                    processed_images = []
+                    temp_img_path = os.path.join(temp_dir, img_file.name)
                     
-                    for img_file in uploaded_images:
-                        temp_img_path = os.path.join(temp_dir, img_file.name)
-                        with open(temp_img_path, "wb") as f:
-                            f.write(img_file.getbuffer())
-                        
-                        detected_loc = extract_location_text(temp_img_path, reader)
-                        ext = os.path.splitext(img_file.name)[1]
-                        
-                        if detected_loc:
-                            safe_loc = detected_loc.replace('/', '').strip()
-                            name_counter[safe_loc] = name_counter.get(safe_loc, 0) + 1
-                            new_name = f"{safe_loc} ({name_counter[safe_loc]}){ext}"
-                        else:
-                            new_name = img_file.name
-                        
-                        processed_images.append({'path': temp_img_path, 'new_name': new_name})
+                    # --- RAM OPTIMIZATION: Resize image to max 1200px before saving ---
+                    with Image.open(img_file) as img:
+                        img.thumbnail((1200, 1200))
+                        img.save(temp_img_path, quality=85)
                     
-                    output_docx_path = os.path.join(temp_dir, "Generated_Report.docx")
-                    create_report(template_path, processed_images, output_docx_path)
+                    detected_loc = extract_location_text(temp_img_path, reader)
+                    ext = os.path.splitext(img_file.name)[1]
                     
-                    st.success("Report generated successfully!")
+                    if detected_loc:
+                        safe_loc = detected_loc.replace('/', '').strip()
+                        name_counter[safe_loc] = name_counter.get(safe_loc, 0) + 1
+                        new_name = f"{safe_loc} ({name_counter[safe_loc]}){ext}"
+                    else:
+                        new_name = img_file.name
                     
-                    with open(output_docx_path, "rb") as f:
-                        st.download_button(
-                            label="📥 Download Word Report",
-                            data=f.read(),
-                            file_name="Photo_Location_Table_Output.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        )
+                    processed_images.append({'path': temp_img_path, 'new_name': new_name})
+                    
+                    # Explicitly release memory after each photo
+                    gc.collect()
+                
+                status_text.text("Building Word document...")
+                output_docx_path = os.path.join(temp_dir, "Generated_Report.docx")
+                create_report(template_path, processed_images, output_docx_path)
+                
+                progress_bar.progress(1.0)
+                status_text.empty()
+                st.success(f"Successfully processed {total_imgs} photos!")
+                
+                with open(output_docx_path, "rb") as f:
+                    st.download_button(
+                        label="📥 Download Word Report",
+                        data=f.read(),
+                        file_name="Photo_Location_Table_Output.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
