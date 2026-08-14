@@ -40,16 +40,27 @@ def load_ocr_reader():
     craft_path = os.path.join(model_dir, "craft_mlt_25k.pth")
     english_path = os.path.join(model_dir, "english_g2.pth")
     
-    # Download files automatically if not present
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+
+    # Download CRAFT model if missing
     if not os.path.exists(craft_path):
-        with st.spinner("Initializing OCR detection model (~70MB)... Please wait."):
-            urllib.request.urlretrieve(craft_url, craft_path)
+        with st.spinner("Downloading OCR detection model (~70MB)... Please wait."):
+            response = requests.get(craft_url, headers=headers, stream=True)
+            response.raise_for_status()
+            with open(craft_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
             
+    # Download English model if missing
     if not os.path.exists(english_path):
-        with st.spinner("Initializing OCR language model (~15MB)... Please wait."):
-            urllib.request.urlretrieve(english_url, english_path)
+        with st.spinner("Downloading OCR language model (~15MB)... Please wait."):
+            response = requests.get(english_url, headers=headers, stream=True)
+            response.raise_for_status()
+            with open(english_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
             
-    # Load EasyOCR from the local directory
+    # Load EasyOCR from local cached directory
     return easyocr.Reader(['en'], gpu=False, model_storage_directory=model_dir, download_enabled=False, verbose=False)
 
 # -----------------------------------------------------------------------------
